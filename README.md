@@ -77,8 +77,8 @@ I worked in this order, which is also the order of the pipeline:
 
 1. **Imported the two spreadsheets into Monday.com** through Monday's Excel importer,
    which creates the board and its columns in one step and types them better than an
-   API script would. `Work_Order_Tracker Data.xlsx` has a title row above the real
-   header, so its header row had to be set to row 2.
+   API script would. `Work_Order_Tracker Data.xlsx` opens with a blank row, so its
+   real column names are on row 2 and the importer's header row had to be set there.
 2. **Profiled the real seed files** (`tools/inspect_seed_data.py`) before
    writing a line of parsing logic. That surfaced the header rows pasted into the
    data, the 52 % missing deal values, the categorical probability field and the
@@ -375,7 +375,8 @@ quickest reliable path:
 
 ### 3. Create the Work Orders board
 
-`Work_Order_Tracker Data.xlsx` has a **title row above the real header**, so:
+`Work_Order_Tracker Data.xlsx` opens with a **blank first row** — the real column
+names are on **row 2** — so:
 
 * if the importer offers a "header row" selector, choose **row 2**; or
 * open the file, delete row 1, save, and import the result.
@@ -691,8 +692,8 @@ weight and indirection without capability.
 
 **1. The data is much messier than a schema implies.** Profiling the seed files
 first was the single highest-value hour of the project. It revealed: two rows in
-the deals sheet that are the column headers pasted back into the data; a title row
-above the real header in the work-order file (so `header=1`); 12 exact duplicate
+the deals sheet that are the column headers pasted back into the data; a blank first
+row in the work-order file, putting its real header on row 2 (so `header=1`); 12 exact duplicate
 rows; and 52 % of deals with no recorded value. Detecting header-echo rows needed a
 dedicated heuristic (a row where ≥ 3 cells, and ≥ 50 % of populated cells, equal
 their own column title).
