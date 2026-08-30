@@ -44,7 +44,7 @@ is never asked to add, average or percentage anything.
 
 ## Approach
 
-The brief is a data problem wearing a chatbot's clothes. The hard part is not
+This is a data problem wearing a chatbot's clothes. The hard part is not
 producing fluent text — it is producing a number a founder can act on, from data
 that is roughly half-empty and inconsistently formatted, and being honest about
 the half that is missing.

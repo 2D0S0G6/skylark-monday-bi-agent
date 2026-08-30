@@ -6,10 +6,11 @@ Skylark Drones — Monday.com Business Intelligence Agent
 
 ## 1. Problem interpretation
 
-The brief asks for a founder-facing analyst, not a chart tool and not a chatbot
+This is built as a founder-facing analyst, not a chart tool and not a chatbot
 over a spreadsheet. A founder asking *"how's the pipeline this quarter?"* wants a
 number, the one or two things that number implies, and an honest note when the
-underlying data is incomplete.
+underlying data is incomplete. Anything else — a dashboard they have to read, or
+prose they cannot check — moves work back onto the person asking.
 
 That framing drove three decisions:
 
@@ -44,9 +45,10 @@ stack trace.
 
 ## 3. Why Groq
 
-Specified by the brief, and a good fit. Two LLM calls per question (plan, then
-narrate) sit on the interactive path, so latency is felt directly; Groq's inference
-speed keeps a full answer in the low seconds.
+Two LLM calls per question (plan, then narrate) sit on the interactive path, so
+latency is felt directly — a founder asking a question in a meeting will not wait
+twice. Groq's inference speed keeps a full answer in the low seconds, which is
+what makes the two-call split affordable in the first place.
 
 The default is `openai/gpt-oss-120b` — the most capable model available on the test
 account, and one that supports JSON mode, which the planner requires. It is a
@@ -62,11 +64,12 @@ degradation to keyword mode.
 
 ## 4. Why Streamlit
 
-The brief specifies it, and for a data-centric internal tool it is genuinely the
-right call: chat, dataframes, expanders, spinners and caching come built in, and
-the deployment story on Streamlit Community Cloud is a `requirements.txt` and four
-secrets. A React frontend plus an API service would have cost most of the time
-budget and delivered no analytical capability.
+For a data-centric internal tool this is the right shape: chat, dataframes,
+expanders, spinners and caching come built in, and the deployment story on
+Streamlit Community Cloud is a `requirements.txt` and four secrets. A React
+frontend plus an API service would have cost most of the time budget and
+delivered no analytical capability — the value here is in the numbers, not the
+chrome around them.
 
 The UI is deliberately shaped as an executive tool rather than a generic chat: a
 KPI strip, a data-quality panel with severity coding, an "Analysis details" panel
@@ -208,8 +211,9 @@ A leadership update is treated as a **standing briefing**, not a filtered query.
 - **Fixed risk heuristics** rather than a learned model — with no outcome history,
   a scoring model would be unfounded. Each flagged deal lists the concrete signals
   that triggered it.
-- **No write-back to Monday.** Read-only was sufficient for the brief and avoids a
-  whole class of destructive failure.
+- **No write-back to Monday.** Answering questions needs only reads, and staying
+  read-only means no question, however phrased, can modify or delete a board —
+  eliminating a whole class of destructive failure rather than guarding against it.
 - **`tools/seed_to_monday.py` (automated board creation) was cut** in favour of a
   precise manual import walkthrough in the README; Monday's own importer handles
   column typing better than an API script would.
