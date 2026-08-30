@@ -180,9 +180,15 @@ I worked in this order, which is also the order of the pipeline:
 **Query understanding**
 - Groq converts questions into a validated `QueryPlan` (intent, boards, sector,
   period, status filter, grouping).
-- Twelve intents including `leadership_update`, `cross_board_analysis`, `data_quality`.
+- Thirteen intents including `leadership_update`, `cross_board_analysis`,
+  `data_quality` and `greeting`.
 - Clarifying questions **only** when genuinely ambiguous (*"How are we doing?"*),
   never when the user named a sector, board, metric or period.
+- Greetings and *"what can you do?"* get a warm orientation with suggested
+  questions — not a refusal — and cost neither an LLM call nor a board fetch.
+- Genuinely unrelated questions are declined politely, with a pointer back to what
+  the agent *can* answer. The keyword fallback declines them too, so an unrelated
+  question never returns a business summary just because Groq was unavailable.
 - Conversational memory: *"How is energy doing?"* → *"What about infrastructure?"*
   keeps the previous intent and period.
 - A keyword planner takes over transparently if Groq is unavailable.

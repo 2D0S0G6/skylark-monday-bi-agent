@@ -48,6 +48,77 @@ _INTENT_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("operational_health", ("operational health", "how is delivery", "delivery health")),
 ]
 
+#: Greetings and "what can you do" openers. Matched before anything else so a
+#: "hi" never costs an LLM round-trip or a board fetch.
+_GREETINGS = (
+    "hi", "hii", "hiii", "hey", "heya", "hello", "helo", "yo", "sup", "hola",
+    "namaste", "good morning", "good afternoon", "good evening", "gm", "greetings",
+    "thanks", "thank you", "thx", "ty", "cheers", "ok thanks", "okay thanks",
+    "bye", "goodbye", "see you",
+)
+
+_CAPABILITY_QUESTIONS = (
+    "what can you do", "what can you help", "who are you", "what are you",
+    "how do you work", "what do you do", "help", "how can you help",
+    "what questions", "what should i ask", "how does this work",
+    "what data do you have", "capabilities",
+)
+
+
+def _is_greeting(text: str) -> bool:
+    """True for a bare greeting or a capability question.
+
+    Deliberately conservative: the greeting must be essentially the whole message,
+    so "hi, how is the mining pipeline?" is treated as the real question it is.
+    """
+    cleaned = text.strip().strip("!?.,").lower()
+    if not cleaned:
+        return False
+    if cleaned in _GREETINGS:
+        return True
+    if any(cleaned.startswith(g) and len(cleaned.split()) <= 3 for g in _GREETINGS):
+        return True
+    return any(phrase in cleaned for phrase in _CAPABILITY_QUESTIONS)
+
+
+#: Vocabulary that marks a question as being about this business data. Used only
+#: by the fallback planner, to avoid answering an unrelated question with a
+#: business summary when the LLM is unavailable to classify it.
+_DOMAIN_VOCABULARY = frozenset("""
+pipeline funnel deal deals opportunity opportunities revenue sales sold sell
+sector sectors vertical verticals industry segment client clients customer
+customers account accounts stage stages won win wins winning lost lose losing
+close closing closed forecast quarter quarterly month monthly year fy fiscal
+value values amount amounts crore cr lakh lakhs rupee rupees inr money
+work workorder workorders order orders project projects delivery deliver
+delivered delayed delay delays late overdue execution executing operational
+operations ops workload capacity billing billed invoice invoiced collection
+collections receivable owner owners rep reps kam bd risk risky risks
+performance performing health summary update briefing leadership executive
+business company data quality missing status probability weighted stalled
+active open ongoing completed blocked
+""".split())
+
+
+def _mentions_the_business(text: str, history: list[dict] | None) -> bool:
+    """True when a question plausibly concerns the Deals / Work Orders data.
+
+    Used only in the fallback planner. Deliberately generous: a false positive
+    costs a slightly odd answer, whereas a false negative refuses a legitimate
+    question.
+    """
+    tokens = set(re.findall(r"[a-z]+", text.lower()))
+    if tokens & _DOMAIN_VOCABULARY:
+        return True
+    # Sector names and owner codes count as domain vocabulary.
+    if _detect_sector(text) or _detect_owner(text):
+        return True
+    # A short follow-up inherits the previous turn's subject.
+    if history and len(text.split()) <= 6:
+        return True
+    return False
+
+
 _VAGUE_QUESTIONS = (
     "how are we doing", "how's it going", "hows it going", "how are things",
     "give me an update", "what's up", "whats up", "how is business",
@@ -98,6 +169,13 @@ def heuristic_plan(question: str, history: list[dict] | None = None) -> QueryPla
     text = (question or "").strip()
     lowered = text.lower()
 
+    if _is_greeting(text):
+        return QueryPlan(
+            intent="greeting", boards=["deals"],
+            reasoning="Greeting or capability question; no data lookup required.",
+            source="fallback",
+        )
+
     intent = "general_business_summary"
     for candidate, keywords in _INTENT_KEYWORDS:
         if any(k in lowered for k in keywords):
@@ -145,6 +223,17 @@ def heuristic_plan(question: str, history: list[dict] | None = None) -> QueryPla
                     date_range = previous.get("date_range", "all_time")
                 status_filter = status_filter or previous.get("status_filter")
                 break
+
+    # Nothing in the question relates to this data, and it is not a vague
+    # "how are we doing?" opener -> decline rather than answer with a summary.
+    if not _mentions_the_business(text, history) and not any(
+        v in lowered for v in _VAGUE_QUESTIONS
+    ):
+        return QueryPlan(
+            intent="out_of_scope", boards=["deals"],
+            reasoning="No reference to the Deals or Work Orders data.",
+            source="fallback",
+        )
 
     needs_clarification = False
     clarification_question = None
@@ -210,6 +299,10 @@ class QueryPlanner:
         """Plan a question, falling back to heuristics on any LLM problem."""
         if not question or not question.strip():
             return heuristic_plan("", history)
+
+        # A greeting needs no model call and no board fetch.
+        if _is_greeting(question):
+            return heuristic_plan(question, history)
 
         if not self.llm.available:
             logger.info("Groq unavailable; using the heuristic planner")

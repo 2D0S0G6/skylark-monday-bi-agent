@@ -17,6 +17,7 @@ Intent = Literal[
     "leadership_update",
     "data_quality",
     "general_business_summary",
+    "greeting",
     "out_of_scope",
 ]
 
@@ -24,7 +25,7 @@ ALL_INTENTS: tuple[str, ...] = (
     "pipeline_analysis", "revenue_analysis", "deal_analysis", "sector_analysis",
     "sales_rep_analysis", "work_order_analysis", "operational_health",
     "cross_board_analysis", "leadership_update", "data_quality",
-    "general_business_summary", "out_of_scope",
+    "general_business_summary", "greeting", "out_of_scope",
 )
 
 #: Tokens the date resolver understands. The planner is constrained to these.

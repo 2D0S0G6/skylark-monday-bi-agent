@@ -21,7 +21,11 @@ import pandas as pd
 from agent.data_service import BusinessData, DataService
 from agent.llm import GroqLLM
 from agent.planner import QueryPlanner
-from agent.prompts import CLARIFICATION_TEMPLATE
+from agent.prompts import (
+    CLARIFICATION_TEMPLATE,
+    GREETING_RESPONSE,
+    OUT_OF_SCOPE_RESPONSE,
+)
 from agent.response import ResponseWriter
 from agent.schemas import QueryPlan
 from analytics.cross_board import analyze_cross_board
@@ -89,16 +93,16 @@ class BIAgent:
 
             plan = heuristic_plan(question, history)
 
+        # Greetings and capability questions are answered directly: no LLM call,
+        # no Monday fetch, and a warm orientation rather than a refusal.
+        if plan.intent == "greeting":
+            return AgentAnswer(
+                answer=GREETING_RESPONSE, plan=plan, narration_source="greeting"
+            )
+
         if plan.intent == "out_of_scope":
             return AgentAnswer(
-                answer=(
-                    "I can only answer questions about the Skylark Deals and Work Orders "
-                    "boards — pipeline, revenue, sectors, deal risk, work-order execution "
-                    "and how sales compares with delivery. Try one of the example questions "
-                    "in the sidebar."
-                ),
-                plan=plan,
-                narration_source="clarification",
+                answer=OUT_OF_SCOPE_RESPONSE, plan=plan, narration_source="clarification"
             )
 
         if plan.needs_clarification and plan.clarification_options:

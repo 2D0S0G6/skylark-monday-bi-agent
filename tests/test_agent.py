@@ -289,7 +289,7 @@ def test_out_of_scope_question_is_declined_politely():
     payload = json.dumps({"intent": "out_of_scope", "boards": ["deals"]})
     agent, api = build_agent(StubGroq([payload]))
     answer = agent.ask("What is the capital of France?", today=TODAY)
-    assert "Deals and Work Orders" in answer.answer
+    assert "Deals" in answer.answer and "Work Orders" in answer.answer
     assert api.request_count == 0
 
 
@@ -328,3 +328,104 @@ def test_deterministic_renderer_quotes_precomputed_displays():
     markdown = render_facts_markdown(plan, facts)
     assert "₹" in markdown
     assert "Data quality" in markdown
+
+
+# --- greetings and tone -----------------------------------------------------
+
+@pytest.mark.parametrize(
+    "greeting",
+    ["hi", "Hi!", "hello", "Hey there", "good morning", "thanks", "thank you",
+     "who are you", "what can you do?", "help", "how does this work"],
+)
+def test_greetings_are_recognised_not_refused(greeting):
+    plan = heuristic_plan(greeting)
+    assert plan.intent == "greeting"
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["hi, how is the mining pipeline?", "hello - which deals are at risk?",
+     "hey what's our biggest opportunity"],
+)
+def test_a_greeting_prefix_does_not_swallow_the_real_question(question):
+    plan = heuristic_plan(question)
+    assert plan.intent != "greeting"
+
+
+def test_greeting_answers_warmly_without_touching_monday_or_groq():
+    """A 'hi' must cost no API call and must not read as a refusal."""
+    settings = make_settings()
+    api = FakeMondayAPI()
+    stub = StubGroq()
+    service = DataService(
+        settings, client=MondayClient(settings, transport=api.transport(), max_retries=1),
+        today=TODAY,
+    )
+    agent = BIAgent(settings=settings, data_service=service,
+                    llm=GroqLLM(make_settings(groq_api_key="k"), client=stub))
+    answer = agent.ask("hi", today=TODAY)
+
+    assert answer.narration_source == "greeting"
+    assert api.request_count == 0, "a greeting must not fetch board data"
+    assert stub.calls == [], "a greeting must not call the LLM"
+
+    text = answer.answer.lower()
+    assert "hello" in text
+    assert "only answer" not in text and "not able to help" not in text
+    # It should orient the user, not just decline.
+    assert "pipeline" in text and "leadership update" in text
+
+
+def test_out_of_scope_declines_but_stays_helpful():
+    payload = json.dumps({"intent": "out_of_scope", "boards": ["deals"]})
+    agent, api = build_agent(StubGroq([payload]))
+    answer = agent.ask("What is the capital of France?", today=TODAY)
+
+    text = answer.answer
+    assert api.request_count == 0
+    assert "Deals" in text and "Work Orders" in text
+    # Declines, but offers a way forward rather than ending the conversation.
+    assert "glad to help" in text.lower()
+    assert "example questions" in text.lower()
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["what is the capital of France?", "write me a poem", "what's the weather like",
+     "tell me a joke"],
+)
+def test_fallback_planner_declines_unrelated_questions(question):
+    """Without Groq, an unrelated question must not get a business summary."""
+    assert heuristic_plan(question).intent == "out_of_scope"
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["How's our pipeline looking this quarter?", "Which deals are at risk?",
+     "How many work orders are delayed?", "How is energy doing?",
+     "How is OWNER_002 performing?", "What are our biggest opportunities?",
+     "Prepare a leadership update.", "How are we doing?"],
+)
+def test_fallback_planner_never_declines_a_legitimate_question(question):
+    assert heuristic_plan(question).intent != "out_of_scope"
+
+
+def test_short_follow_up_is_not_mistaken_for_out_of_scope():
+    history = [{"question": "How is energy doing?",
+                "plan": {"intent": "sector_analysis", "sector": "Energy",
+                         "date_range": "all_time"}}]
+    assert heuristic_plan("and infrastructure?", history).intent != "out_of_scope"
+
+
+def test_unrelated_question_without_groq_is_declined_end_to_end():
+    settings = make_settings()
+    api = FakeMondayAPI()
+    service = DataService(
+        settings, client=MondayClient(settings, transport=api.transport(), max_retries=1),
+        today=TODAY,
+    )
+    agent = BIAgent(settings=settings, data_service=service, llm=GroqLLM(settings, client=None))
+    answer = agent.ask("what is the capital of France?", today=TODAY)
+    assert api.request_count == 0
+    assert "₹" not in answer.answer, "an unrelated question must not return figures"
+    assert "glad to help" in answer.answer.lower()
