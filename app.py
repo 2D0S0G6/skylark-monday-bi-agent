@@ -469,6 +469,26 @@ def render_data_sources(agent: BIAgent) -> None:
 # main
 # ---------------------------------------------------------------------------
 
+def render_clarification_choices(answer: AgentAnswer, *, key_prefix: str) -> None:
+    """Render the clarification options as buttons.
+
+    Typing "1" still works, but making the choice clickable removes the guesswork
+    about what the reply is supposed to look like -- and a click sends the option
+    text itself, which is unambiguous.
+    """
+    if not answer.needs_clarification or not answer.plan:
+        return
+    options = answer.plan.clarification_options
+    if not options:
+        return
+    columns = st.columns(min(len(options), 4))
+    for index, option in enumerate(options[:4]):
+        column = columns[index % len(columns)]
+        if column.button(option, key=f"{key_prefix}_clarify_{index}", width="stretch"):
+            st.session_state.pending_question = option
+            st.rerun()
+
+
 def main() -> None:
     _init_state()
     settings = get_settings()
@@ -517,6 +537,7 @@ def main() -> None:
     if not question:
         if st.session_state.last_answer:
             answer = st.session_state.last_answer
+            render_clarification_choices(answer, key_prefix="last")
             render_headline_metrics(answer.facts)
             render_details(answer)
             render_data_sources(agent)
@@ -540,6 +561,8 @@ def main() -> None:
                 f"Monday.com data fetched at {answer.data_fetched_at}"
                 + (" · ⚠️ stale snapshot" if answer.is_stale else "")
             )
+
+    render_clarification_choices(answer, key_prefix=f"turn{len(st.session_state.history)}")
 
     if answer.facts:
         render_headline_metrics(answer.facts)

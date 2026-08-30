@@ -162,9 +162,120 @@ def _detect_owner(question: str) -> str | None:
     return None
 
 
+# --- replying to a clarification -------------------------------------------
+#
+# When the agent offers numbered options, the natural reply is "1" -- which on
+# its own means nothing to a planner. Resolving the selection here, before any
+# model call, is both deterministic and the only way the keyword planner can
+# honour a choice at all.
+
+_ORDINAL_WORDS: dict[str, int] = {
+    "first": 1, "1st": 1, "one": 1,
+    "second": 2, "2nd": 2, "two": 2,
+    "third": 3, "3rd": 3, "three": 3,
+    "fourth": 4, "4th": 4, "four": 4,
+    "fifth": 5, "5th": 5, "five": 5,
+    "last": -1,
+}
+
+_SELECTION_RE = re.compile(r"^[#(\[]?\s*(\d{1,2})\s*[.)\]]?$")
+_SELECTION_WORDED_RE = re.compile(r"^(?:option|number|no\.?|choice|answer)\s*(\d{1,2})$")
+
+
+def offered_options(history: list[dict] | None) -> list[str]:
+    """The clarification options offered on the immediately preceding turn.
+
+    Only the last turn counts: once the user has moved on, a stale clarification
+    must not hijack an unrelated question.
+    """
+    if not history:
+        return []
+    plan = history[-1].get("plan") or {}
+    if not plan.get("needs_clarification"):
+        return []
+    return [str(o).strip() for o in (plan.get("clarification_options") or []) if str(o).strip()]
+
+
+def resolve_clarification_reply(question: str, history: list[dict] | None) -> str | None:
+    """Map a reply such as ``"1"``, ``"the second one"`` or ``"revenue"`` onto the
+    option it selects. Returns ``None`` when the reply is not a selection.
+    """
+    options = offered_options(history)
+    if not options:
+        return None
+    text = (question or "").strip().lower().strip(".)!?,")
+    if not text:
+        return None
+
+    match = _SELECTION_RE.match(text) or _SELECTION_WORDED_RE.match(text)
+    if match:
+        index = int(match.group(1))
+        return options[index - 1] if 1 <= index <= len(options) else None
+
+    tokens = re.findall(r"[a-z0-9]+", text)
+    if len(tokens) <= 4:
+        for token in tokens:
+            index = _ORDINAL_WORDS.get(token)
+            if index == -1:
+                return options[-1]
+            if index and index <= len(options):
+                return options[index - 1]
+
+    # The option's own wording, or an unambiguous part of it ("revenue").
+    for option in options:
+        if text == option.lower():
+            return option
+    if len(text) >= 4:
+        partial = [o for o in options if text in o.lower()]
+        if len(partial) == 1:
+            return partial[0]
+    return None
+
+
+#: The four angles offered when a question could mean several things.
+STANDARD_CLARIFICATION_OPTIONS = [
+    "Sales / pipeline",
+    "Revenue (won and billed)",
+    "Operations / work orders",
+    "Overall business health",
+]
+
+
+def _is_bare_selection(text: str) -> bool:
+    """True for a lone ``"2"`` / ``"third"`` -- a choice with nothing to choose from."""
+    cleaned = (text or "").strip().lower().strip(".)!?,")
+    if not cleaned:
+        return False
+    if _SELECTION_RE.match(cleaned) or _SELECTION_WORDED_RE.match(cleaned):
+        return True
+    return cleaned in _ORDINAL_WORDS
+
+
+def _ask_what_they_meant(reason: str, source: str) -> QueryPlan:
+    return QueryPlan(
+        intent="general_business_summary",
+        boards=["deals", "work_orders"],
+        needs_clarification=True,
+        clarification_question=(
+            "I'm not sure what that refers to — which of these would you like?"
+        ),
+        clarification_options=list(STANDARD_CLARIFICATION_OPTIONS),
+        reasoning=reason,
+        source=source,
+    )
+
+
 def heuristic_plan(question: str, history: list[dict] | None = None) -> QueryPlan:
     """Keyword-based planner used when Groq is unavailable or returns bad JSON."""
     text = (question or "").strip()
+    # "1" in reply to a numbered clarification means the first option.
+    selected = resolve_clarification_reply(text, history)
+    if selected:
+        text = selected
+    elif _is_bare_selection(text):
+        # A number with no pending question: answering the previous topic again
+        # would look like the agent ignored them.
+        return _ask_what_they_meant("A bare selection with no options pending.", "fallback")
     lowered = text.lower()
 
     if _is_greeting(text):
@@ -241,6 +352,9 @@ def heuristic_plan(question: str, history: list[dict] | None = None) -> QueryPla
         and not sector
         and any(v in lowered for v in _VAGUE_QUESTIONS)
         and len(lowered.split()) <= 8
+        # Never ask twice in a row: the previous turn already offered options, so
+        # this turn commits to an answer whatever the reply looked like.
+        and not offered_options(history)
     ):
         needs_clarification = True
         clarification_question = "I can analyse that from a few angles. Which would you like?"
@@ -298,6 +412,15 @@ class QueryPlanner:
         if not question or not question.strip():
             return heuristic_plan("", history)
 
+        # A reply to a numbered clarification is resolved to the option it picks
+        # before the model sees it, so "1" carries its meaning rather than none.
+        selected = resolve_clarification_reply(question, history)
+        answering_clarification = bool(offered_options(history))
+        if selected:
+            question = selected
+        elif _is_bare_selection(question):
+            return _ask_what_they_meant("A bare selection with no options pending.", "fallback")
+
         # A greeting needs no model call and no board fetch.
         if _is_greeting(question):
             return heuristic_plan(question, history)
@@ -347,6 +470,12 @@ class QueryPlanner:
                 return repaired
 
         plan = plan.model_copy(update={"source": plan.source or "llm"})
+        if answering_clarification and plan.needs_clarification:
+            # The model asked again. One clarification is a helpful question;
+            # two in a row is a loop, so this turn answers with what it has.
+            plan = plan.model_copy(update={
+                "needs_clarification": False, "clarification_options": [],
+            })
         return plan.with_defaults()
 
 
@@ -365,4 +494,10 @@ def _format_history(history: list[dict] | None, limit: int = 4) -> str:
                 f"Interpreted as: intent={plan.get('intent')}, sector={plan.get('sector')}, "
                 f"period={plan.get('date_range')}"
             )
+            # Without this, a reply of "1" is unresolvable and the model can only
+            # ask again -- which is exactly how a clarification loop starts.
+            options = plan.get("clarification_options") or []
+            if plan.get("needs_clarification") and options:
+                offered = "; ".join(f"{i + 1}. {o}" for i, o in enumerate(options))
+                lines.append(f"Assistant asked the user to choose between: {offered}")
     return "\n".join(lines) or "(no previous turns)"

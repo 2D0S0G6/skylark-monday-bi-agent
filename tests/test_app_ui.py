@@ -225,3 +225,40 @@ def test_reruns_do_not_repeat_the_question_or_refetch(monkeypatch):
     assert not app.exception
     assert len(app.session_state["history"]) == 1, "the question was answered again"
     assert api.request_count == requests_after_answer, "the boards were refetched"
+
+
+def test_clarification_options_render_as_buttons(monkeypatch):
+    """A numbered list is only useful if the reply is obvious; buttons make it so."""
+    import app as app_module
+    from agent.orchestrator import AgentAnswer
+    from agent.schemas import QueryPlan
+
+    clicked: list[str] = []
+
+    class _Col:
+        def button(self, label, **kw):
+            clicked.append(label)
+            return False
+
+    monkeypatch.setattr(app_module.st, "columns", lambda n: [_Col() for _ in range(n)])
+
+    plan = QueryPlan(intent="general_business_summary", needs_clarification=True,
+                     clarification_options=["Sales / pipeline", "Operations / work orders"])
+    answer = AgentAnswer(answer="which?", plan=plan, needs_clarification=True)
+    app_module.render_clarification_choices(answer, key_prefix="t")
+
+    assert clicked == ["Sales / pipeline", "Operations / work orders"]
+
+
+def test_no_buttons_when_there_is_nothing_to_choose(monkeypatch):
+    import app as app_module
+    from agent.orchestrator import AgentAnswer
+    from agent.schemas import QueryPlan
+
+    monkeypatch.setattr(
+        app_module.st, "columns",
+        lambda n: pytest.fail("columns() must not be called without options"),
+    )
+    app_module.render_clarification_choices(
+        AgentAnswer(answer="x", plan=QueryPlan()), key_prefix="t"
+    )

@@ -471,3 +471,107 @@ def test_empty_board_is_reported_as_no_data_not_zero_deals():
     answer = agent.ask("How's our pipeline?", today=TODAY)
     assert "no usable rows" in answer.answer
     assert "0 open deals" not in answer.answer
+
+
+# --- replying to a clarification --------------------------------------------
+
+def _clarified(options):
+    """A history whose last turn offered ``options``."""
+    return [{
+        "question": "How are we doing?",
+        "answer": "Which would you like?",
+        "plan": {"intent": "general_business_summary", "needs_clarification": True,
+                 "clarification_options": options, "date_range": "all_time"},
+    }]
+
+
+OPTIONS = ["Sales / pipeline", "Revenue (won and billed)",
+           "Operations / work orders", "Overall business health"]
+
+
+@pytest.mark.parametrize(
+    "reply,expected",
+    [
+        ("1", "Sales / pipeline"),
+        ("2.", "Revenue (won and billed)"),
+        ("(3)", "Operations / work orders"),
+        ("#4", "Overall business health"),
+        ("option 2", "Revenue (won and billed)"),
+        ("first", "Sales / pipeline"),
+        ("the second one", "Revenue (won and billed)"),
+        ("last", "Overall business health"),
+        ("revenue", "Revenue (won and billed)"),
+        ("9", None),                      # out of range
+        ("how is mining doing?", None),    # a real question, not a selection
+    ],
+)
+def test_clarification_reply_resolves_to_the_chosen_option(reply, expected):
+    from agent.planner import resolve_clarification_reply
+
+    assert resolve_clarification_reply(reply, _clarified(OPTIONS)) == expected
+
+
+def test_a_selection_is_only_read_against_a_pending_clarification():
+    from agent.planner import resolve_clarification_reply
+
+    answered = [{"question": "x", "answer": "y",
+                 "plan": {"intent": "pipeline_analysis", "needs_clarification": False}}]
+    assert resolve_clarification_reply("1", answered) is None
+
+
+def test_numbered_reply_is_honoured_instead_of_re_clarifying():
+    """The defect: replying "1" to numbered options produced another question."""
+    plan = heuristic_plan("1", _clarified(OPTIONS))
+    assert not plan.needs_clarification
+    assert plan.intent == "pipeline_analysis"
+
+    operations = heuristic_plan("3", _clarified(OPTIONS))
+    assert operations.intent in {"work_order_analysis", "operational_health"}
+
+
+def test_the_agent_never_clarifies_twice_in_a_row():
+    """One clarification is helpful; two is a loop the user cannot escape."""
+    agent, _ = build_agent()
+    history, clarifications = [], 0
+    for reply in ["How are we doing?", "1", "2", "3", "4"]:
+        answer = agent.ask(reply, history=history, today=TODAY)
+        if answer.needs_clarification:
+            clarifications += 1
+            assert clarifications == 1 or not history[-1]["plan"]["needs_clarification"], (
+                "clarified twice in succession"
+            )
+        history.append({"question": reply, "answer": answer.answer,
+                        "plan": answer.plan.model_dump() if answer.plan else None})
+
+
+def test_llm_planner_asking_again_is_overridden(monkeypatch):
+    """Even if the model re-clarifies, the turn after a clarification answers."""
+    agent, _ = build_agent(StubGroq([
+        '{"intent":"general_business_summary","boards":["deals"],'
+        '"needs_clarification":true,"clarification_question":"which?",'
+        '"clarification_options":["a","b"]}'
+    ]))
+    plan = agent.planner.plan("pipeline please", _clarified(OPTIONS))
+    assert not plan.needs_clarification
+
+
+def test_bare_number_without_a_pending_question_asks_rather_than_guessing():
+    answered = [{"question": "pipeline", "answer": "...",
+                 "plan": {"intent": "pipeline_analysis", "needs_clarification": False}}]
+    plan = heuristic_plan("2", answered)
+    assert plan.needs_clarification
+    assert "not sure what that refers to" in (plan.clarification_question or "")
+
+
+def test_offered_options_reach_the_planner_prompt():
+    """The model cannot resolve "1" unless it is told what was offered."""
+    from agent.planner import _format_history
+
+    rendered = _format_history(_clarified(OPTIONS))
+    assert "1. Sales / pipeline" in rendered
+    assert "2. Revenue (won and billed)" in rendered
+
+
+def test_internal_field_slugs_never_reach_the_user_as_options():
+    plan = QueryPlan(clarification_options=["pipeline_by_sector", "deal_details"])
+    assert plan.clarification_options == ["Pipeline by sector", "Deal details"]

@@ -87,6 +87,32 @@ class QueryPlan(BaseModel):
             return None
         return str(value).strip()
 
+    @field_validator("clarification_options", mode="before")
+    @classmethod
+    def _clean_options(cls, value: object) -> list[str]:
+        """Present options as English.
+
+        The model sometimes answers with internal-looking field slugs
+        (``pipeline_by_sector``), which are meaningless to a founder. Humanise
+        them here so nothing internal can reach the UI, and cap the list so a
+        runaway response cannot flood the screen.
+        """
+        if not value:
+            return []
+        if isinstance(value, str):
+            value = [value]
+        cleaned: list[str] = []
+        for item in value:
+            text = str(item).strip()
+            if not text:
+                continue
+            if "_" in text and " " not in text:
+                text = text.replace("_", " ").strip()
+                text = text[:1].upper() + text[1:]
+            if text not in cleaned:
+                cleaned.append(text[:80])
+        return cleaned[:5]
+
     @field_validator("boards", mode="before")
     @classmethod
     def _clean_boards(cls, value: object) -> list[str]:
