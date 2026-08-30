@@ -102,7 +102,7 @@ class QueryPlan(BaseModel):
         cleaned = [v for v in cleaned if v in allowed]
         return cleaned or ["deals"]
 
-    def with_defaults(self) -> "QueryPlan":
+    def with_defaults(self) -> QueryPlan:
         """Fill board selection implied by the intent, so the plan is always runnable."""
         boards = set(self.boards)
         if self.intent in {"work_order_analysis", "operational_health"}:

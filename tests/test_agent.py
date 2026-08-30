@@ -3,18 +3,16 @@ from __future__ import annotations
 
 import json
 
-import pandas as pd
 import pytest
 
 from agent.data_service import DataService
-from agent.llm import GroqLLM, LLMError, extract_json
+from agent.llm import GroqLLM, extract_json
 from agent.orchestrator import BIAgent, validate_facts
 from agent.planner import QueryPlanner, heuristic_plan
 from agent.response import ResponseWriter, render_facts_markdown
 from agent.schemas import QueryPlan
 from monday.client import MondayClient
 from tests.conftest import TODAY, FakeMondayAPI, make_settings
-
 
 # --- stubs ------------------------------------------------------------------
 
@@ -429,3 +427,47 @@ def test_unrelated_question_without_groq_is_declined_end_to_end():
     assert api.request_count == 0
     assert "₹" not in answer.answer, "an unrelated question must not return figures"
     assert "glad to help" in answer.answer.lower()
+
+
+# --- resilience regressions -------------------------------------------------
+
+def test_narration_failure_does_not_escape_ask(monkeypatch):
+    """A defect in the narrator must degrade, not crash the app.
+
+    ``ResponseWriter`` already handles Groq errors; this covers everything else
+    (an unexpected SDK error, a renderer bug on an unusual fact shape). The
+    computed figures are correct at that point and must still reach the user.
+    """
+    agent, _ = build_agent(StubGroq(['{"intent":"pipeline_analysis","boards":["deals"]}']))
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("narrator exploded")
+
+    monkeypatch.setattr(agent.writer, "write", _boom)
+
+    answer = agent.ask("How's our pipeline?", today=TODAY)
+    assert answer.narration_source == "error"
+    assert answer.facts, "the computed facts must survive a narration failure"
+    assert "could not be written up" in answer.answer
+
+
+def test_leadership_narration_failure_does_not_escape_ask(monkeypatch):
+    agent, _ = build_agent(StubGroq(['{"intent":"leadership_update","boards":["deals"]}']))
+    monkeypatch.setattr(
+        agent.writer, "write_leadership_update",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    answer = agent.ask("Prepare a leadership update.", today=TODAY)
+    assert answer.narration_source == "error"
+    assert answer.facts
+
+
+def test_empty_board_is_reported_as_no_data_not_zero_deals():
+    """An unreachable/empty board must not read as a real figure of zero."""
+    agent, _ = build_agent(api=FakeMondayAPI(deals=[], work_orders=[]))
+    agent.llm = GroqLLM(make_settings(groq_api_key=None))
+    agent.writer = ResponseWriter(agent.llm)
+
+    answer = agent.ask("How's our pipeline?", today=TODAY)
+    assert "no usable rows" in answer.answer
+    assert "0 open deals" not in answer.answer

@@ -235,8 +235,6 @@ def format_inr(amount: float | None, *, precision: int = 2) -> str:
         return f"{sign}₹{magnitude / 1e7:,.{precision}f} Cr"
     if magnitude >= 1e5:
         return f"{sign}₹{magnitude / 1e5:,.{precision}f} L"
-    if magnitude >= 1e3:
-        return f"{sign}₹{magnitude:,.0f}"
     return f"{sign}₹{magnitude:,.0f}"
 
 

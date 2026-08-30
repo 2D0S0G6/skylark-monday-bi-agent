@@ -145,7 +145,7 @@ class GroqLLM:
             started = time.perf_counter()
             try:
                 completion = self._client.chat.completions.create(**kwargs)
-            except Exception as exc:  # noqa: BLE001 - SDK raises many error types
+            except Exception as exc:  # the Groq SDK raises many error types
                 last_error = exc
                 message = str(exc).lower()
                 if "model_not_found" in message or "does not exist" in message:

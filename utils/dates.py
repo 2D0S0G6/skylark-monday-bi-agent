@@ -165,9 +165,7 @@ def quarter_range(
     start_year = fy_start_year + start_month_abs // 12
     start_month = start_month_abs % 12 + 1
     start = pd.Timestamp(year=start_year, month=start_month, day=1)
-    end = start + pd.offsets.QuarterEnd(startingMonth=(start_month + 2 - 1) % 12 + 1)
-    end = (start + pd.DateOffset(months=3)) - pd.Timedelta(days=1)
-    end = pd.Timestamp(end.date()) + pd.Timedelta(hours=23, minutes=59, seconds=59)
+    end = _end_of_day((start + pd.DateOffset(months=3)) - pd.Timedelta(days=1))
 
     if fy_start_month == 1:
         label = f"Q{quarter_index + 1} {start_year}"

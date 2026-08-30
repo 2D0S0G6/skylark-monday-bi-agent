@@ -15,7 +15,7 @@ from monday.client import (
 )
 from monday.column_map import DEAL_FIELDS, WORK_ORDER_FIELDS, resolve_columns
 from monday.schemas import BoardColumn
-from tests.conftest import DEAL_COLUMNS, FakeMondayAPI, WO_COLUMNS, make_settings
+from tests.conftest import DEAL_COLUMNS, WO_COLUMNS, FakeMondayAPI, make_settings
 
 
 def test_pagination_retrieves_every_item(settings, fake_api):

@@ -282,10 +282,6 @@ EXECUTION_STATUS_ALIASES: dict[str, str] = {
     "cancelled": "Blocked", "dropped": "Blocked",
 }
 
-#: Statuses that still consume operational capacity.
-ACTIVE_EXECUTION_STATUSES = ("Not Started", "In Progress")
-
-
 def canonical_execution_status(value: object) -> CanonicalValue:
     if is_missing(value):
         return CanonicalValue(UNKNOWN, value, "missing")
@@ -325,7 +321,7 @@ def canonical_probability(value: object) -> CanonicalValue:
     if key in _PROBABILITY_ALIASES:
         return CanonicalValue(_PROBABILITY_ALIASES[key], value, "alias")
 
-    from utils.numbers import parse_percentage  # local import avoids a cycle
+    from utils.numbers import parse_percentage  # noqa: PLC0415 - avoids an import cycle
 
     pct = parse_percentage(value)
     if pct.ok:

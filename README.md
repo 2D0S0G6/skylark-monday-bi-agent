@@ -7,11 +7,15 @@ The supplied Excel files are seed data used only to set the boards up. At runtim
 the application queries Monday.com over GraphQL; change a value in Monday and the
 next answer reflects it.
 
+**Live app:** <https://dsg-skylark-monday-bi-agents.streamlit.app/>
+**Repository:** <https://github.com/2D0S0G6/skylark-monday-bi-agent>
+
 **Contents** — [Approach](#approach) · [Architecture](#architecture) ·
-[Features](#features) · [Setup](#setup) · [Monday.com setup](#mondaycom-setup) ·
+[Technology stack](#technology-stack) · [Features](#features) · [Setup](#setup) ·
+[Monday.com setup](#mondaycom-setup) ·
 [Deployment](#deployment-streamlit-community-cloud) ·
 [Example questions](#example-questions) · [Testing](#testing) ·
-[Assumptions](#assumptions) · [Trade-offs](#trade-offs) ·
+[Security](#security) · [Assumptions](#assumptions) · [Trade-offs](#trade-offs) ·
 [AI tools used](#ai-tools-used) · [Challenges faced](#challenges-faced) ·
 [Design decisions](#design-decisions) · [Limitations](#limitations) ·
 [Potential improvements](#potential-improvements)
@@ -132,9 +136,14 @@ I worked in this order, which is also the order of the pipeline:
 .
 ├── app.py                      # Streamlit UI
 ├── config.py                   # env / secrets configuration
-├── requirements.txt
-├── requirements-dev.txt
+├── requirements.txt            # runtime dependencies (the only build input)
+├── requirements-dev.txt        # + pytest, ruff, openpyxl
+├── ruff.toml                   # lint configuration
+├── pytest.ini
 ├── .env.example
+├── .streamlit/
+│   ├── config.toml             # committed: theme + headless server
+│   └── secrets.toml.example    # placeholders; the real file is git-ignored
 ├── DECISION_LOG.md
 │
 ├── agent/
@@ -170,8 +179,30 @@ I worked in this order, which is also the order of the pipeline:
 │   └── verify_connection.py    # end-to-end config smoke test
 │
 ├── seed_data/                  # the supplied Excel files (setup input only)
-└── tests/                      # 238 tests, fully mocked API
+└── tests/                      # 277 tests, fully mocked API
 ```
+
+---
+
+## Technology stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| UI | **Streamlit** (`>=1.49,<2`) | Chat, dataframes, spinners and caching built in; deploys from a `requirements.txt`. |
+| Language model | **Groq** (`openai/gpt-oss-120b` by default) | Fast inference on the interactive path; JSON mode for the planner. Configurable via `GROQ_MODEL`. |
+| Data source | **Monday.com GraphQL API v2** | Read-only, over `httpx`. No SDK, no scraping. |
+| Analytics | **pandas** (`>=2.1,<3`) | Every figure is computed here, never by the model. |
+| Validation | **Pydantic v2** | Validates the LLM's query plan and the board schemas. |
+| HTTP | **httpx** | One dependency for the API client, and `MockTransport` makes the whole stack testable offline. |
+| Config | **python-dotenv** + `st.secrets` | `.env` locally, Streamlit secrets in deployment. |
+| Tests | **pytest** | 277 tests, fully mocked, no network. |
+
+Python 3.11+. No database, no vector store, no agent framework — see
+*[AI tools used](#ai-tools-used)* for why.
+
+The dependency set is deliberately small and pure-Python: there is nothing to
+compile, no system package to install, and both the newest and oldest resolutions
+permitted by `requirements.txt` are tested.
 
 ---
 
@@ -428,6 +459,10 @@ resolution is shown in the UI's **Data sources** panel.
 4. Deploy. `requirements.txt` is the only build input; there are no local-only
    dependencies, no hard-coded paths and no compiled extensions.
 
+The running deployment is <https://dsg-skylark-monday-bi-agents.streamlit.app/>.
+Community Cloud sleeps an idle app, so the first request after a quiet period
+takes a few seconds to wake it.
+
 The same repository runs unchanged on Render, Railway, Fly.io or a container —
 the start command is always `streamlit run app.py`.
 
@@ -457,7 +492,8 @@ the start command is always `streamlit run app.py`.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                # 238 tests, ~11s, no network access required
+pytest                # 277 tests, ~12s, no network access required
+ruff check .          # lint: clean
 ```
 
 The Monday.com API is mocked with `httpx.MockTransport` and Groq with a stub
@@ -471,6 +507,55 @@ parsing, missing-value handling, malformed and empty datasets, pipeline metrics,
 work-order metrics, cross-board aggregation, column mapping, pagination, every
 API error path, caching and staleness, planner fallbacks, leadership-update
 structure, fact validation, and a headless Streamlit render.
+
+---
+
+## Security
+
+**Credentials.** Nothing is hard-coded. `MONDAY_API_TOKEN` and `GROQ_API_KEY` are
+read from the process environment, a git-ignored `.env` locally, or Streamlit
+secrets in deployment (`config.py`). `.env`, `.env.*` and
+`.streamlit/secrets.toml` are all in `.gitignore`; only `.env.example` and
+`.streamlit/secrets.toml.example`, which contain placeholders, are committed.
+
+**Secrets never reach the browser.** Streamlit renders server-side, so no key is
+ever sent to the client. The UI's Configuration panel and the setup screen report
+each secret only as *configured* / *missing* and name its source
+(`Settings.safe_summary()`, `config.diagnose()`) — never its value. Logging runs
+through a redacting filter (`utils/logging.py`) that masks anything resembling a
+Groq or Monday token. Monday.com API errors are surfaced to the user as typed,
+message-only errors; the developer detail goes to the logs.
+
+**Read-only by design.** The Monday.com client issues queries only — there is no
+mutation anywhere in the codebase, so no question, however phrased, can modify or
+delete a board. The token still only needs read scope.
+
+**Untrusted input.** Two inputs are outside our control: the user's question and
+the board's own text (deal names, sector labels, which anyone with board access
+can edit). Both are treated as data:
+
+- The planner's output is constrained by a Pydantic schema — `intent` and `boards`
+  are `Literal` types, and free-text fields such as `sector` are only ever used as
+  pandas filter values (`regex=False`), never as code, a query or a column name.
+  An unrecognised `group_by` falls back to a known dimension rather than reaching
+  `groupby()`.
+- The narrator receives finished figures, never raw rows, and both model prompts
+  state explicitly that text inside the facts JSON is data and never instruction.
+- Anything interpolated into the small amount of `unsafe_allow_html` markup used
+  for the KPI cards and intent pills is HTML-escaped (`app.py`), so neither board
+  content nor model output can inject markup. Answers themselves render through
+  plain `st.markdown`, which does not execute HTML.
+
+**No dangerous surface.** The runtime path opens no files, executes no shell
+command, and calls no host other than the configured Monday.com and Groq
+endpoints. `eval`/`exec` appear nowhere. The seed spreadsheets are read only by a
+developer-only profiling tool (`tools/inspect_seed_data.py`).
+
+**Known limits.** There is no authentication in front of the app — a public
+Streamlit URL means anyone with the link can read the board figures, so treat the
+URL as sensitive or add access control before sharing it widely. Every viewer
+shares one Monday.com service token, so board-level permissions are not enforced
+per user (see *[Potential improvements](#potential-improvements)*, item 10).
 
 ---
 
@@ -576,7 +661,7 @@ and avoids a model trained on no outcome history.
   split, the join policy, the probability weights, the missing-≠-zero rule) was
   made deliberately and is documented in `DECISION_LOG.md`; the AI accelerated
   implementation, it did not choose the architecture.
-- All generated code was reviewed, executed and tested. The 238-test suite exists
+- All generated code was reviewed, executed and tested. The 277-test suite exists
   partly as the verification mechanism for that: nothing was accepted on the basis
   that it looked plausible.
 

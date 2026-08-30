@@ -1,0 +1,47 @@
+# Lint configuration. Run with:  ruff check .
+#
+# The codebase already carries `# noqa: BLE001` / `# noqa: PLC0415` suppressions;
+# the rules they refer to are selected here, so every suppression is verified
+# rather than decorative.
+
+line-length = 100
+target-version = "py311"
+exclude = [".venv", "venv", "seed_data"]
+
+[lint]
+select = [
+    "E",       # pycodestyle
+    "W",       # pycodestyle warnings
+    "F",       # pyflakes
+    "I",       # import sorting
+    "B",       # bugbear
+    "UP",      # pyupgrade
+    "SIM",     # simplify
+    "C4",      # comprehensions
+    "BLE",     # blind except -- deliberate here, and each one is justified
+    "PLC0415", # import not at top of file -- deliberate for optional deps
+    "RUF100",  # unused noqa
+]
+ignore = [
+    "E501",    # line length is enforced by review, not by the linter: the prompt
+               # templates in agent/prompts.py are prose and read worse when wrapped
+    "SIM105",  # `contextlib.suppress` is not clearer than try/except/pass here
+    "B008",    # function call in default argument -- not used in this codebase
+    "SIM905",  # the word-list constants read better as wrapped prose than as a
+               # single-line list literal
+    "SIM114",  # two short, separately-commented branches beat one long condition
+    "SIM102",  # the nested `if`s carry a comment between them explaining the second
+    "UP042",   # `class Severity(str, Enum)` is deliberate: it keeps `.value` and
+               # JSON serialisation identical across Python versions
+    "C408",    # `dict(a=1, b=2)` reads better than a literal in the test factories
+]
+
+[lint.per-file-ignores]
+# Tests import inside test functions on purpose, so a module under test can be
+# imported after the environment has been monkeypatched.
+"tests/*" = ["B011", "SIM117", "PLC0415"]
+# Dev-only scripts import optional/heavy dependencies lazily.
+"tools/*" = ["PLC0415"]
+
+[lint.isort]
+known-first-party = ["agent", "analytics", "monday", "utils", "tools", "config"]

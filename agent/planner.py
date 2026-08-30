@@ -114,9 +114,7 @@ def _mentions_the_business(text: str, history: list[dict] | None) -> bool:
     if _detect_sector(text) or _detect_owner(text):
         return True
     # A short follow-up inherits the previous turn's subject.
-    if history and len(text.split()) <= 6:
-        return True
-    return False
+    return bool(history and len(text.split()) <= 6)
 
 
 _VAGUE_QUESTIONS = (

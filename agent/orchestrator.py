@@ -30,9 +30,8 @@ from agent.response import ResponseWriter
 from agent.schemas import QueryPlan
 from analytics.cross_board import analyze_cross_board
 from analytics.deals import analyze_deals, deal_scope, deals_at_risk, pipeline_by_dimension
-from analytics.work_orders import analyze_work_orders, work_order_scope
+from analytics.work_orders import analyze_work_orders
 from config import Settings, get_settings
-from monday.client import MondayError
 from utils.dates import DateRange, resolve_date_range
 from utils.logging import get_logger
 
@@ -87,9 +86,9 @@ class BIAgent:
 
         try:
             plan = self.planner.plan(question, history, today=today)
-        except Exception as exc:  # noqa: BLE001 - planning must never break the app
+        except Exception as exc:
             logger.exception("Planner crashed: %s", exc)
-            from agent.planner import heuristic_plan
+            from agent.planner import heuristic_plan  # noqa: PLC0415 - avoids a cycle
 
             plan = heuristic_plan(question, history)
 
@@ -130,7 +129,7 @@ class BIAgent:
 
         try:
             facts = self.compute_facts(plan, data, today=today)
-        except Exception as exc:  # noqa: BLE001 - analytics must never break the app
+        except Exception as exc:
             logger.exception("Analytics failed: %s", exc)
             return AgentAnswer(
                 answer=(
@@ -148,12 +147,21 @@ class BIAgent:
         validation = validate_facts(facts)
         facts["validation"] = validation
 
-        if plan.intent == "leadership_update":
-            answer, source = self.writer.write_leadership_update(
-                facts, period=facts.get("period", "the current period"), today=today
-            )
-        else:
-            answer, source = self.writer.write(question, plan, facts)
+        # Narration is the last step and the least critical: if it fails for any
+        # reason, the computed figures are still correct and must still reach the
+        # user. ``ResponseWriter`` already handles Groq failures; this guard
+        # covers everything else (an unexpected SDK error, a renderer defect on an
+        # unusual fact shape) so ``ask()`` keeps its "never raises" contract.
+        try:
+            if plan.intent == "leadership_update":
+                answer, source = self.writer.write_leadership_update(
+                    facts, period=facts.get("period", "the current period"), today=today
+                )
+            else:
+                answer, source = self.writer.write(question, plan, facts)
+        except Exception as exc:
+            logger.exception("Narration failed: %s", exc)
+            answer, source = _minimal_answer(facts), "error"
 
         warnings = list(data.warnings)
         if data.is_stale:
@@ -218,7 +226,7 @@ class BIAgent:
                 data.deals,
                 sector=plan.sector,
                 owner=plan.owner,
-                date_range=date_range if plan.intent != "revenue_analysis" else date_range,
+                date_range=date_range,
                 status_filter=plan.status_filter,
                 group_by=group_by,
                 today=today,
@@ -327,6 +335,32 @@ def _deal_group_by(group_by: str | None) -> str:
 
 def _wo_group_by(group_by: str | None) -> str:
     return _WO_DIMENSIONS.get((group_by or "sector"), "sector")
+
+
+def _minimal_answer(facts: dict) -> str:
+    """Last-resort answer used when even the deterministic renderer fails.
+
+    The figures in ``facts`` are already computed and correct, so the user still
+    gets the headline numbers plus an honest note, rather than a stack trace.
+    """
+    lines = ["### Result", ""]
+    summary = ((facts.get("deals") or {}).get("summary") or {})
+    open_value = (summary.get("open_pipeline_value") or {}).get("display")
+    if open_value:
+        lines.append(f"- Open pipeline: **{open_value}**")
+    if summary.get("open_deal_count") is not None:
+        lines.append(f"- Open deals: **{summary['open_deal_count']}**")
+    wo_summary = ((facts.get("work_orders") or {}).get("summary") or {})
+    if wo_summary.get("active_work_orders") is not None:
+        lines.append(f"- Active work orders: **{wo_summary['active_work_orders']}**")
+    if len(lines) == 2:
+        lines.append("- The figures for this question could not be summarised.")
+    lines += [
+        "",
+        "_The answer could not be written up. The computed figures are in "
+        "**Analysis details** below; they are unaffected._",
+    ]
+    return "\n".join(lines)
 
 
 def validate_facts(facts: dict) -> dict:

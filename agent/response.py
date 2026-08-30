@@ -126,6 +126,10 @@ def _display(money: dict | None) -> str:
 
 def _deal_lines(deals: dict) -> list[str]:
     lines: list[str] = []
+    if deals.get("available") is False:
+        # An unreachable or empty board must not read as "0 open deals" -- that
+        # is a real figure, and this is the absence of one.
+        return [f"- {deals.get('reason', 'Deal data is not available.')}"]
     summary = deals.get("summary", {})
     scope = deals.get("scope", {})
     if summary.get("deal_count") == 0:
@@ -172,6 +176,8 @@ def _deal_lines(deals: dict) -> list[str]:
 
 def _wo_lines(work_orders: dict) -> list[str]:
     lines: list[str] = []
+    if work_orders.get("available") is False:
+        return [f"- {work_orders.get('reason', 'Work order data is not available.')}"]
     summary = work_orders.get("summary", {})
     if summary.get("work_order_count") == 0:
         return ["- No work orders match this scope."]

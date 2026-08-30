@@ -85,12 +85,9 @@ class DataQualityReport:
             )
         )
 
-    def extend(self, other: "DataQualityReport | None") -> None:
+    def extend(self, other: DataQualityReport | None) -> None:
         if other:
             self.issues.extend(other.issues)
-
-    def by_severity(self, severity: Severity) -> list[QualityIssue]:
-        return [i for i in self.issues if i.severity == severity]
 
     def top(self, limit: int = 5) -> list[QualityIssue]:
         """Most material issues first: excluded rows outrank informational notes."""

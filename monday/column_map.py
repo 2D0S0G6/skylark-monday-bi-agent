@@ -282,7 +282,7 @@ def resolve_columns(
             if score >= threshold:
                 candidates.append((score, spec.name, column.title, method))
 
-    for score, field_name, column_title, method in sorted(candidates, key=lambda x: -x[0]):
+    for _score_value, field_name, column_title, method in sorted(candidates, key=lambda x: -x[0]):
         if field_name in mapping or column_title in claimed:
             continue
         mapping[field_name] = column_title

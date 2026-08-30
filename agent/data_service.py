@@ -24,9 +24,8 @@ from analytics.normalization import (
     normalize_work_orders,
 )
 from config import Settings, get_settings
-from monday.client import MondayClient, MondayError
+from monday.client import MondayClient, MondayError, snapshot_to_dataframe
 from monday.column_map import DEAL_FIELDS, WORK_ORDER_FIELDS, ColumnMapping, resolve_columns
-from monday.client import snapshot_to_dataframe
 from utils.logging import get_logger
 
 logger = get_logger(__name__)

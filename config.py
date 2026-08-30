@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
 
 from dotenv import load_dotenv
@@ -29,7 +29,7 @@ def _from_streamlit_secrets(key: str) -> str | None:
     """Read a key from ``st.secrets`` without requiring Streamlit at import time."""
     try:
         import streamlit as st  # noqa: PLC0415 - optional dependency at this layer
-    except Exception:  # pragma: no cover - streamlit always present in the app
+    except Exception:  # noqa: BLE001 # pragma: no cover - streamlit is optional here
         return None
     try:
         if key in st.secrets:
@@ -78,13 +78,6 @@ def board_id(key: str) -> str | None:
     return trailing.group(1) if trailing else raw
 
 
-def env_bool(key: str, default: bool = False) -> bool:
-    raw = env(key)
-    if raw is None:
-        return default
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
-
-
 @dataclass(frozen=True)
 class Settings:
     monday_api_token: str | None
@@ -99,17 +92,8 @@ class Settings:
     page_size: int
     request_timeout_seconds: int
     delay_grace_days: int
-    missing_reasons: tuple[str, ...] = field(default=("missing", "invalid"))
 
     # -- readiness -------------------------------------------------------
-    @property
-    def monday_configured(self) -> bool:
-        return bool(
-            self.monday_api_token
-            and self.monday_deals_board_id
-            and self.monday_work_orders_board_id
-        )
-
     @property
     def groq_configured(self) -> bool:
         return bool(self.groq_api_key)
@@ -179,7 +163,7 @@ def secrets_store_status() -> tuple[str, int]:
     """
     try:
         import streamlit as st  # noqa: PLC0415
-    except Exception:  # pragma: no cover - streamlit is always installed here
+    except Exception:  # noqa: BLE001 # pragma: no cover - streamlit is optional here
         return "no_streamlit", 0
     try:
         count = len(list(st.secrets.keys()))

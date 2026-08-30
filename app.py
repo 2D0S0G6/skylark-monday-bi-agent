@@ -7,7 +7,7 @@ arithmetic in :mod:`analytics`, and all narration in :mod:`agent.response`.
 """
 from __future__ import annotations
 
-import json
+import html
 
 import pandas as pd
 import streamlit as st
@@ -100,7 +100,7 @@ def render_sidebar(agent: BIAgent | None) -> None:
 
         st.markdown("#### Ask about")
         for i, question in enumerate(EXAMPLE_QUESTIONS):
-            if st.button(question, key=f"ex_{i}", use_container_width=True):
+            if st.button(question, key=f"ex_{i}", width="stretch"):
                 st.session_state.pending_question = question
                 st.rerun()
 
@@ -119,7 +119,7 @@ def render_sidebar(agent: BIAgent | None) -> None:
             else:
                 st.caption("No data fetched yet.")
 
-            if st.button("🔄 Refresh data from Monday.com", use_container_width=True):
+            if st.button("🔄 Refresh data from Monday.com", width="stretch"):
                 with st.spinner("Fetching the latest board data…"):
                     agent.data_service.invalidate()
                     data, error = agent.data_service.get_data_or_stale(force_refresh=True)
@@ -129,7 +129,7 @@ def render_sidebar(agent: BIAgent | None) -> None:
                     st.success(f"Refreshed at {data.fetched_at.strftime('%H:%M:%S')}.")
                 st.rerun()
 
-        if st.button("🧹 Clear conversation", use_container_width=True):
+        if st.button("🧹 Clear conversation", width="stretch"):
             st.session_state.history = []
             st.session_state.last_answer = None
             st.rerun()
@@ -139,7 +139,7 @@ def render_sidebar(agent: BIAgent | None) -> None:
             for key, value in settings.safe_summary().items():
                 st.write(f"**{key}:** {value}")
             st.caption("Secrets are read from the environment and are never displayed.")
-            if st.button("Reload configuration", use_container_width=True):
+            if st.button("Reload configuration", width="stretch"):
                 reset_settings_cache()
                 st.cache_resource.clear()
                 st.rerun()
@@ -149,9 +149,9 @@ def render_sidebar(agent: BIAgent | None) -> None:
 # setup screen
 # ---------------------------------------------------------------------------
 
-def render_setup_screen(missing: list[str]) -> None:
+def render_setup_screen() -> None:
     """Setup screen that *diagnoses* the configuration rather than restating docs."""
-    from config import diagnose
+    from config import diagnose  # noqa: PLC0415 - only needed on the setup screen
 
     st.title("🛰️ Skylark Drones — Business Intelligence Agent")
     report = diagnose()
@@ -172,7 +172,7 @@ def render_setup_screen(missing: list[str]) -> None:
         }
         for v in report["variables"]
     ]
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(rows), hide_index=True)
 
     store_message = {
         "available": f"Streamlit secrets store is readable and holds "
@@ -244,10 +244,16 @@ The full board-import walkthrough is in `README.md`.
 # ---------------------------------------------------------------------------
 
 def _metric_card(label: str, value: str, sub: str = "") -> str:
+    """Build one KPI card.
+
+    Every interpolated value is HTML-escaped: these blocks are rendered with
+    ``unsafe_allow_html``, and some of the text originates from board data or
+    from the language model, neither of which may be trusted as markup.
+    """
     return (
-        f"<div class='sk-metric'><div class='sk-label'>{label}</div>"
-        f"<div class='sk-value'>{value}</div>"
-        f"<div class='sk-sub'>{sub}</div></div>"
+        f"<div class='sk-metric'><div class='sk-label'>{html.escape(str(label))}</div>"
+        f"<div class='sk-value'>{html.escape(str(value))}</div>"
+        f"<div class='sk-sub'>{html.escape(str(sub))}</div></div>"
     )
 
 
@@ -300,7 +306,7 @@ def render_headline_metrics(facts: dict) -> None:
     if not cards:
         return
     columns = st.columns(min(len(cards), 5))
-    for column, (label, value, sub) in zip(columns, cards[:5]):
+    for column, (label, value, sub) in zip(columns, cards[:5], strict=True):
         column.markdown(_metric_card(label, value, sub), unsafe_allow_html=True)
 
 
@@ -308,7 +314,7 @@ def _quality_notices(facts: dict) -> list[dict]:
     issues: list[dict] = []
     for block in ("deals", "work_orders", "cross_board"):
         section = facts.get(block) or {}
-        issues.extend(((section.get("data_quality") or {}).get("issues") or []))
+        issues.extend((section.get("data_quality") or {}).get("issues") or [])
     seen, unique = set(), []
     for issue in issues:
         if issue.get("code") in seen:
@@ -355,7 +361,9 @@ def render_details(answer: AgentAnswer) -> None:
             pills.append(f"planner: {plan.source}")
             pills.append(f"narration: {answer.narration_source}")
             st.markdown(
-                " ".join(f"<span class='sk-pill'>{p}</span>" for p in pills),
+                " ".join(
+                    f"<span class='sk-pill'>{html.escape(str(p))}</span>" for p in pills
+                ),
                 unsafe_allow_html=True,
             )
             if plan.reasoning:
@@ -382,34 +390,34 @@ def _render_tables(facts: dict) -> None:
     breakdown = deals.get("breakdown") or {}
     if breakdown.get("rows"):
         st.markdown(f"**Pipeline by {breakdown['dimension'].replace('_', ' ')}**")
-        st.dataframe(_flatten_rows(breakdown["rows"]), use_container_width=True, hide_index=True)
+        st.dataframe(_flatten_rows(breakdown["rows"]), hide_index=True)
 
     top = deals.get("top_opportunities") or {}
     if top.get("rows"):
         st.markdown("**Largest open opportunities**")
-        st.dataframe(_flatten_rows(top["rows"]), use_container_width=True, hide_index=True)
+        st.dataframe(_flatten_rows(top["rows"]), hide_index=True)
 
     at_risk = deals.get("at_risk") or {}
     if at_risk.get("rows"):
         st.markdown("**Deals carrying a risk signal**")
-        st.dataframe(_flatten_rows(at_risk["rows"]), use_container_width=True, hide_index=True)
+        st.dataframe(_flatten_rows(at_risk["rows"]), hide_index=True)
 
     work_orders = facts.get("work_orders") or {}
     wo_breakdown = work_orders.get("breakdown") or {}
     if wo_breakdown.get("rows"):
         st.markdown(f"**Work orders by {wo_breakdown['dimension'].replace('_', ' ')}**")
-        st.dataframe(_flatten_rows(wo_breakdown["rows"]), use_container_width=True, hide_index=True)
+        st.dataframe(_flatten_rows(wo_breakdown["rows"]), hide_index=True)
 
     delayed = work_orders.get("delayed") or {}
     if delayed.get("rows"):
         st.markdown("**Delayed work orders**")
-        st.dataframe(_flatten_rows(delayed["rows"]), use_container_width=True, hide_index=True)
+        st.dataframe(_flatten_rows(delayed["rows"]), hide_index=True)
 
     cross = facts.get("cross_board") or {}
     comparison = cross.get("comparison") or {}
     if comparison.get("rows"):
         st.markdown("**Pipeline vs active workload, by sector**")
-        st.dataframe(_flatten_rows(comparison["rows"]), use_container_width=True, hide_index=True)
+        st.dataframe(_flatten_rows(comparison["rows"]), hide_index=True)
         st.caption(comparison.get("join_policy", {}).get("interpretation", ""))
 
 
@@ -447,10 +455,7 @@ def render_data_sources(agent: BIAgent) -> None:
                 f"{block['rows']} rows"
             )
             if block["mapped_fields"]:
-                st.dataframe(
-                    pd.DataFrame(block["mapped_fields"]),
-                    use_container_width=True, hide_index=True,
-                )
+                st.dataframe(pd.DataFrame(block["mapped_fields"]), hide_index=True)
             if block["unmapped_fields"]:
                 st.caption(
                     "Fields with no matching column (related metrics are reported as "
@@ -471,7 +476,7 @@ def main() -> None:
     missing = [m for m in settings.missing_settings() if m != "GROQ_API_KEY"]
     if missing:
         render_sidebar(None)
-        render_setup_screen(settings.missing_settings())
+        render_setup_screen()
         return
 
     try:

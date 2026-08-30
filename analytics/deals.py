@@ -470,7 +470,7 @@ def expected_close_analysis(
     quarters: int = 4,
 ) -> dict:
     """Distribute open pipeline across the coming quarters by expected close date."""
-    from utils.dates import quarter_range  # local import keeps the module import light
+    from utils.dates import quarter_range  # noqa: PLC0415 - keeps module import light
 
     frame = dataset.frame if frame is None else frame
     if "expected_close_date" not in frame.columns or frame.empty:
