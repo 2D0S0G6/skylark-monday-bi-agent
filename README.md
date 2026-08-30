@@ -3,9 +3,15 @@
 A conversational BI agent that answers founder-level business questions from two
 **live Monday.com boards** — *Deals* and *Work Orders*.
 
-The supplied Excel files are seed data used only to set the boards up. At runtime
-the application queries Monday.com over GraphQL; change a value in Monday and the
-next answer reflects it.
+**The two supplied Excel files were imported into Monday.com first**, using Monday's
+own Excel importer, to create the *Deals* board (from `Deal funnel Data.xlsx`) and the
+*Work Orders* board (from `Work_Order_Tracker Data.xlsx`). That import is the first
+step of the project and is written up in full under
+[Monday.com setup](#mondaycom-setup), so the boards can be recreated from scratch.
+
+The spreadsheets in `seed_data/` are therefore **setup input only** — nothing in the
+runtime path opens them. At runtime the application queries the live Monday.com boards
+over GraphQL; change a value in Monday and the next answer reflects it.
 
 **Live app:** <https://dsg-skylark-monday-bi-agents.streamlit.app/>
 **Repository:** <https://github.com/2D0S0G6/skylark-monday-bi-agent>
@@ -69,19 +75,23 @@ opportunity to re-derive or mis-round it.
 
 I worked in this order, which is also the order of the pipeline:
 
-1. **Profiled the real seed files first** (`tools/inspect_seed_data.py`) before
+1. **Imported the two spreadsheets into Monday.com** through Monday's Excel importer,
+   which creates the board and its columns in one step and types them better than an
+   API script would. `Work_Order_Tracker Data.xlsx` has a title row above the real
+   header, so its header row had to be set to row 2.
+2. **Profiled the real seed files** (`tools/inspect_seed_data.py`) before
    writing a line of parsing logic. That surfaced the header rows pasted into the
    data, the 52 % missing deal values, the categorical probability field and the
    second file's offset header — none of which a guessed schema would have caught.
-2. **Built the parsers bottom-up** (`utils/`) with tests, so currency and date
+3. **Built the parsers bottom-up** (`utils/`) with tests, so currency and date
    handling was proven before anything depended on it.
-3. **Built the Monday client** against a mocked GraphQL endpoint that reproduces
+4. **Built the Monday client** against a mocked GraphQL endpoint that reproduces
    the real board's messiness, so the whole stack was testable offline.
-4. **Built normalisation and analytics**, keeping data quality as a first-class
+5. **Built normalisation and analytics**, keeping data quality as a first-class
    output rather than an afterthought.
-5. **Added the LLM layer last**, so the application was already correct and
+6. **Added the LLM layer last**, so the application was already correct and
    useful before any model was involved — which is why it still works without one.
-6. **Ran it against the real boards**, which surfaced four genuine defects that no
+7. **Ran it against the real boards**, which surfaced four genuine defects that no
    amount of mocking would have (see *Challenges faced*).
 
 ---
@@ -395,6 +405,11 @@ Name the board **Work Orders** and map:
 
 The remaining columns can be imported or skipped — the agent uses what it finds
 and reports the rest as unused.
+
+> **Board names do not matter.** The agent addresses boards by the IDs you configure,
+> never by name, so leaving the importer's defaults (`Deal funnel Data`,
+> `Work_Order_Tracker Data`) works exactly as well as renaming them. Whatever name a
+> board has is shown in the UI's **Data sources** panel.
 
 ### 4. Copy the board IDs
 
