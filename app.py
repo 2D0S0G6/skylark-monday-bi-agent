@@ -150,35 +150,90 @@ def render_sidebar(agent: BIAgent | None) -> None:
 # ---------------------------------------------------------------------------
 
 def render_setup_screen(missing: list[str]) -> None:
+    """Setup screen that *diagnoses* the configuration rather than restating docs."""
+    from config import diagnose
+
     st.title("🛰️ Skylark Drones — Business Intelligence Agent")
+    report = diagnose()
+    on_cloud = report["secrets_store"] != "unavailable"
+
     st.warning(
-        "The agent is not configured yet. It reads its credentials from environment "
-        "variables (or Streamlit secrets) and never stores them in the repository."
+        "The agent is not configured yet. Credentials are read from environment "
+        "variables or Streamlit secrets and are never stored in the repository."
     )
-    st.markdown("**Missing configuration:** " + ", ".join(f"`{m}`" for m in missing))
-    st.markdown(
-        """
-Create a `.env` file next to `app.py` (copy `.env.example`) containing:
 
-```bash
-MONDAY_API_TOKEN=your_monday_api_token
-MONDAY_DEALS_BOARD_ID=1234567890
-MONDAY_WORK_ORDERS_BOARD_ID=0987654321
-GROQ_API_KEY=your_groq_api_key
-GROQ_MODEL=openai/gpt-oss-120b
-```
+    # --- what the app can actually see right now --------------------------
+    st.markdown("#### What this deployment can see")
+    rows = [
+        {
+            "Setting": v["key"],
+            "Status": "✅ found" if v["found"] else "❌ missing",
+            "Source": v["source"],
+        }
+        for v in report["variables"]
+    ]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-* **Monday API token** — Monday.com → your avatar → *Developers* → *My access tokens*.
-* **Board IDs** — open a board; the ID is the number in the URL
-  (`.../boards/1234567890`).
-* **Groq key** — <https://console.groq.com> → *API Keys*.
+    store_message = {
+        "available": f"Streamlit secrets store is readable and holds "
+                     f"{report['secrets_key_count']} key(s).",
+        "empty": "Streamlit secrets store is readable but **empty**.",
+        "unavailable": "No Streamlit secrets store is configured "
+                       "(normal when running locally — use a `.env` file).",
+        "no_streamlit": "Streamlit is unavailable.",
+    }[report["secrets_store"]]
+    st.caption(store_message)
 
-On Streamlit Community Cloud, put the same keys in *App settings → Secrets*.
+    # --- the fix, targeted at where this is actually running --------------
+    if on_cloud:
+        st.markdown("#### Fix: add these to your app's secrets")
+        st.markdown(
+            "In Streamlit Community Cloud open **Manage app → ⋮ → Settings → Secrets**, "
+            "paste the block below, then **Save**. The app reboots automatically; "
+            "if it does not, use **Manage app → Reboot**."
+        )
+        st.code(
+            'MONDAY_API_TOKEN = "your_monday_api_token"\n'
+            'MONDAY_DEALS_BOARD_ID = "1234567890"\n'
+            'MONDAY_WORK_ORDERS_BOARD_ID = "0987654321"\n'
+            'GROQ_API_KEY = "your_groq_api_key"\n'
+            'GROQ_MODEL = "openai/gpt-oss-120b"',
+            language="toml",
+        )
+        st.info(
+            "TOML, not shell syntax — every value must be in double quotes, with "
+            "spaces around the `=`. A missing quote makes Streamlit reject the whole "
+            "block, which looks identical to having set nothing."
+        )
+    else:
+        st.markdown("#### Fix: create a `.env` file next to `app.py`")
+        st.code(
+            "MONDAY_API_TOKEN=your_monday_api_token\n"
+            "MONDAY_DEALS_BOARD_ID=1234567890\n"
+            "MONDAY_WORK_ORDERS_BOARD_ID=0987654321\n"
+            "GROQ_API_KEY=your_groq_api_key\n"
+            "GROQ_MODEL=openai/gpt-oss-120b",
+            language="bash",
+        )
+        st.caption("Copy `.env.example` to `.env` as a starting point. `.env` is git-ignored.")
 
-See `README.md` for the full board-import walkthrough.
+    with st.expander("Where do these values come from?", expanded=False):
+        st.markdown(
+            """
+- **`MONDAY_API_TOKEN`** — Monday.com → your avatar (bottom-left) →
+  *Developers* → *My access tokens*. Needs read access to both boards.
+- **`MONDAY_DEALS_BOARD_ID` / `MONDAY_WORK_ORDERS_BOARD_ID`** — open the board;
+  the ID is the number in the URL (`.../boards/1234567890`). Pasting the whole
+  URL also works — the app extracts the number.
+- **`GROQ_API_KEY`** — <https://console.groq.com> → *API Keys*.
+- **`GROQ_MODEL`** — optional. Groq retires models periodically; run
+  `python -m tools.list_models` to list the IDs your account can use.
+
+The full board-import walkthrough is in `README.md`.
 """
-    )
-    if st.button("I've configured it — reload"):
+        )
+
+    if st.button("🔄 Re-check configuration", type="primary"):
         reset_settings_cache()
         st.cache_resource.clear()
         st.rerun()

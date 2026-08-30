@@ -90,3 +90,53 @@ def test_headline_metric_cards_only_use_computed_values():
     assert isinstance(frame, pd.DataFrame)
     assert frame.loc[0, "value"] == "₹1.00 Cr"
     assert frame.loc[0, "risk_signals"] == "a, b"
+
+
+def test_setup_screen_diagnoses_each_missing_setting(monkeypatch):
+    """The setup screen must show which settings are visible and from where."""
+    for key in ("MONDAY_API_TOKEN", "MONDAY_DEALS_BOARD_ID",
+                "MONDAY_WORK_ORDERS_BOARD_ID", "GROQ_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr("config._from_streamlit_secrets", lambda key: None)
+
+    app = AppTest.from_file(APP_PATH, default_timeout=30)
+    app.run()
+    assert not app.exception
+
+    # A per-setting status table, not just prose.
+    assert app.dataframe, "the setup screen should render a diagnosis table"
+    table = app.dataframe[0].value
+    assert set(table["Setting"]) == {
+        "MONDAY_API_TOKEN", "MONDAY_DEALS_BOARD_ID",
+        "MONDAY_WORK_ORDERS_BOARD_ID", "GROQ_API_KEY",
+    }
+    assert (table["Status"] == "❌ missing").all()
+
+
+def test_diagnose_reports_the_source_of_each_setting(monkeypatch):
+    import config
+
+    # Start from a clean slate so a developer's real .env cannot mask the result.
+    for key in config.REQUIRED_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("MONDAY_API_TOKEN", "from-env")
+    monkeypatch.setattr(
+        "config._from_streamlit_secrets",
+        lambda key: "from-secrets" if key == "GROQ_API_KEY" else None,
+    )
+    report = config.diagnose()
+    by_key = {v["key"]: v for v in report["variables"]}
+    assert by_key["MONDAY_API_TOKEN"]["source"] == "environment / .env"
+    assert by_key["GROQ_API_KEY"]["source"] == "Streamlit secrets"
+    # The two board IDs are supplied by neither source here.
+    assert by_key["MONDAY_DEALS_BOARD_ID"]["source"] == "not found"
+    assert report["all_present"] is False
+
+
+def test_diagnose_never_exposes_a_secret_value(monkeypatch):
+    import config
+    import json
+
+    monkeypatch.setenv("MONDAY_API_TOKEN", "super-secret-value")
+    report = config.diagnose()
+    assert "super-secret-value" not in json.dumps(report)

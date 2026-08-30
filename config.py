@@ -160,3 +160,60 @@ def get_settings() -> Settings:
 def reset_settings_cache() -> None:
     """Used by tests and the UI's 'reload configuration' path."""
     get_settings.cache_clear()
+
+
+REQUIRED_KEYS = (
+    "MONDAY_API_TOKEN",
+    "MONDAY_DEALS_BOARD_ID",
+    "MONDAY_WORK_ORDERS_BOARD_ID",
+    "GROQ_API_KEY",
+)
+
+
+def secrets_store_status() -> tuple[str, int]:
+    """Report whether a Streamlit secrets store is readable, and how many keys it holds.
+
+    Returns ``(status, key_count)`` where status is ``available``, ``empty``,
+    ``unavailable`` or ``no_streamlit``. Only the *count* is exposed -- never a
+    key name's value.
+    """
+    try:
+        import streamlit as st  # noqa: PLC0415
+    except Exception:  # pragma: no cover - streamlit is always installed here
+        return "no_streamlit", 0
+    try:
+        count = len(list(st.secrets.keys()))
+    except Exception:  # noqa: BLE001 - no secrets configured for this app
+        return "unavailable", 0
+    return ("available" if count else "empty"), count
+
+
+def diagnose() -> dict:
+    """Per-variable configuration diagnosis for the setup screen.
+
+    Says *where* each value came from (process environment vs Streamlit secrets)
+    so a deployment that silently ignores its secrets is immediately obvious.
+    Values are never included -- only presence and source.
+    """
+    store_status, store_count = secrets_store_status()
+    variables = []
+    for key in REQUIRED_KEYS:
+        in_env = bool(os.getenv(key))
+        in_secrets = _from_streamlit_secrets(key) is not None
+        if in_env:
+            source = "environment / .env"
+        elif in_secrets:
+            source = "Streamlit secrets"
+        else:
+            source = None
+        variables.append({
+            "key": key,
+            "found": bool(source),
+            "source": source or "not found",
+        })
+    return {
+        "secrets_store": store_status,
+        "secrets_key_count": store_count,
+        "variables": variables,
+        "all_present": all(v["found"] for v in variables),
+    }
